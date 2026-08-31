@@ -376,26 +376,30 @@ export function MapScene({ state }: { state: OloLinkState }) {
             })}
 
           {/* ----------- open communication contacts (shared mission state) */}
-          {state.contacts.map((key) => {
-            const [satId, rxId] = key.split('|') as [string, string];
-            const pa = pointOf(satId);
-            const pb = pointOf(rxId);
-            if (!pa || !pb) return null;
-            if (Math.abs(pa.x - pb.x) > MAP_W / 2) return null; // antimeridian wrap
-            const laser = ASSET_BY_ID[rxId]?.kind === 'haps';
-            return (
-              <line
-                key={`contact-${key}`}
-                x1={pa.x}
-                y1={pa.y}
-                x2={pb.x}
-                y2={pb.y}
-                stroke={laser ? '#22c55e' : '#7dd3fc'}
-                strokeWidth={1.2 * inv}
-                strokeOpacity={0.85}
-              />
-            );
-          })}
+          {state.contacts
+            .filter((key) => {
+              const rxId = key.split('|')[1]!;
+              return ASSET_BY_ID[rxId]?.kind === 'haps';
+            })
+            .map((key) => {
+              const [satId, rxId] = key.split('|') as [string, string];
+              const pa = pointOf(satId);
+              const pb = pointOf(rxId);
+              if (!pa || !pb) return null;
+              if (Math.abs(pa.x - pb.x) > MAP_W / 2) return null; // antimeridian wrap
+              return (
+                <line
+                  key={`contact-${key}`}
+                  x1={pa.x}
+                  y1={pa.y}
+                  x2={pb.x}
+                  y2={pb.y}
+                  stroke="#22c55e"
+                  strokeWidth={1.2 * inv}
+                  strokeOpacity={0.85}
+                />
+              );
+            })}
 
           {/* ------------------------------------------------------- nodes */}
 

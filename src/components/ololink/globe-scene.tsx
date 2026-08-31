@@ -447,162 +447,10 @@ function DashedLine({
  * sat → station, a fainter uplink pulse returns, and the whole contact fades
  * in and out with the pass geometry (elevation + slant range).
  */
-const DOWN_PACKETS = 3;
 
 /** LEO -> HAPS optical crosslink colour (straight green laser). */
 const LASER_GREEN = '#22c55e';
 
-function PassBeam({
-  satId,
-  rxId,
-  live,
-  laser = false,
-}: {
-  satId: string;
-  rxId: string;
-  live: LiveMap;
-  laser?: boolean;
-}) {
-  const N = 2;
-  const core = useRef<THREE.Line>(null);
-  const packs = useRef<THREE.Group>(null);
-  const uplink = useRef<THREE.Mesh>(null);
-  const glow = useRef<THREE.Mesh>(null);
-  const vis = useRef(0);
-  const flow = useRef(Math.random());
-  const upFlow = useRef(Math.random());
-
-  const geometry = useMemo(() => {
-    const g = new THREE.BufferGeometry();
-    g.setAttribute('position', new THREE.BufferAttribute(new Float32Array((N + 1) * 3), 3));
-    g.boundingSphere = new THREE.Sphere(new THREE.Vector3(), 4);
-    return g;
-  }, []);
-
-  const scratch = useMemo(
-    () => ({ a: new THREE.Vector3(), b: new THREE.Vector3(), p: new THREE.Vector3() }),
-    []
-  );
-
-  useFrame((_, d) => {
-    const from = live.get(satId);
-    const to = live.get(rxId);
-    if (!from || !to) return;
-    const { a, b, p } = scratch;
-    a.copy(from);
-    b.copy(to);
-
-    // contact quality drives brightness and data rate, like a real pass
-    const score = windowScore(a, b);
-    const target = THREE.MathUtils.smoothstep(score, 0.15, 0.6);
-    vis.current += (target - vis.current) * Math.min(1, d * 1.4);
-    const v = vis.current;
-
-    // gentle, unhurried stream — a burst per pass, not a strobe
-    const rate = 0.12 + 0.18 * score;
-    flow.current = (flow.current + d * rate) % 1;
-    upFlow.current = (upFlow.current + d * rate * 0.4) % 1;
-
-    const attr = geometry.getAttribute('position') as THREE.BufferAttribute;
-    const arr = attr.array as Float32Array;
-    for (let i = 0; i <= N; i++) {
-      p.copy(a).lerp(b, i / N);
-      arr[i * 3] = p.x;
-      arr[i * 3 + 1] = p.y;
-      arr[i * 3 + 2] = p.z;
-    }
-    attr.needsUpdate = true;
-
-    if (core.current) {
-      const m = core.current.material as THREE.LineBasicMaterial;
-      m.opacity = v * (laser ? 0.95 : 0.28);
-      core.current.visible = v > 0.02;
-    }
-    if (packs.current) {
-      packs.current.visible = v > 0.05;
-      packs.current.children.forEach((child, i) => {
-        const t = (flow.current + i / DOWN_PACKETS) % 1;
-        child.position.copy(p.copy(a).lerp(b, t));
-        const mat = (child as THREE.Mesh).material as THREE.MeshBasicMaterial;
-        mat.opacity = v * Math.pow(Math.sin(t * Math.PI), 2) * 0.7;
-      });
-    }
-    if (uplink.current) {
-      const t = 1 - upFlow.current;
-      uplink.current.visible = v > 0.3;
-      uplink.current.position.copy(p.copy(a).lerp(b, t));
-      (uplink.current.material as THREE.MeshBasicMaterial).opacity =
-        v * Math.sin((1 - t) * Math.PI) * 0.3;
-    }
-    if (glow.current) {
-      // receiving station lights up softly while it is taking data
-      glow.current.visible = v > 0.08;
-      glow.current.position.copy(b);
-      glow.current.scale.setScalar(1);
-      (glow.current.material as THREE.MeshBasicMaterial).opacity = v * 0.22;
-    }
-  });
-
-  return (
-    <group>
-      {/* @ts-expect-error three line primitive */}
-      <line ref={core} geometry={geometry}>
-        <lineBasicMaterial
-          color={laser ? LASER_GREEN : CYAN}
-          transparent
-          opacity={0}
-          depthWrite={false}
-          blending={THREE.AdditiveBlending}
-        />
-      </line>
-      <group ref={packs}>
-        {Array.from({ length: DOWN_PACKETS }, (_, i) => (
-          <mesh key={i}>
-            <sphereGeometry args={[0.004, 8, 8]} />
-            <meshBasicMaterial
-              color={laser ? '#86efac' : '#f0f9ff'}
-              transparent
-              opacity={0}
-              depthWrite={false}
-              blending={THREE.AdditiveBlending}
-            />
-          </mesh>
-        ))}
-      </group>
-      <mesh ref={uplink}>
-        <sphereGeometry args={[0.0028, 6, 6]} />
-        <meshBasicMaterial
-          color="#7dd3fc"
-          transparent
-          opacity={0}
-          depthWrite={false}
-          blending={THREE.AdditiveBlending}
-        />
-      </mesh>
-      <mesh ref={glow}>
-        <sphereGeometry args={[0.009, 12, 12]} />
-        <meshBasicMaterial
-          color="#bae6fd"
-          transparent
-          opacity={0}
-          depthWrite={false}
-          blending={THREE.AdditiveBlending}
-        />
-      </mesh>
-    </group>
-  );
-}
-
-/**
- * Contact scheduler: every ~0.3 s it re-evaluates which LEO is above which
- * receiver's horizon and opens/closes contacts accordingly, with acquisition
- * and loss-of-signal thresholds (hysteresis) so links don't flicker.
- */
-/**
- * LEO -> HAPS straight green laser links: every HAPS acquires the best LEO
- * currently above its horizon and holds the optical contact while it passes.
- */
-const HAPS_RECEIVERS = ASSETS.filter((a) => a.kind === 'haps');
 
 function LaserBeam({
   satId,
@@ -653,15 +501,15 @@ function LaserBeam({
 function ContactNetwork({ live, contacts }: { live: LiveMap; contacts: string[] }) {
   return (
     <>
-      {contacts.map((key) => {
-        const [satId, rxId] = key.split('|') as [string, string];
-        const laser = ASSET_BY_ID[rxId]?.kind === 'haps';
-        return laser ? (
-          <LaserBeam key={key} satId={satId} rxId={rxId} live={live} />
-        ) : (
-          <PassBeam key={key} satId={satId} rxId={rxId} live={live} laser={false} />
-        );
-      })}
+      {contacts
+        .filter((key) => {
+          const rxId = key.split('|')[1]!;
+          return ASSET_BY_ID[rxId]?.kind === 'haps';
+        })
+        .map((key) => {
+          const [satId, rxId] = key.split('|') as [string, string];
+          return <LaserBeam key={key} satId={satId} rxId={rxId} live={live} />;
+        })}
     </>
   );
 }
