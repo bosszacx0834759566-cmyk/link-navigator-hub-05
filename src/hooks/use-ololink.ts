@@ -160,6 +160,37 @@ export function useOloLink(): OloLinkState {
   );
 
 
+  /* ------------------------------------------------------------------
+   * Single source of truth for the orbital simulation.
+   * Contacts/windows are solved here (never inside a view), so the 3D globe
+   * and the 2D map always project the exact same live state.
+   * ---------------------------------------------------------------- */
+  useEffect(() => {
+    setSceneRunning(running);
+  }, [running]);
+
+  const held = useRef<Set<string>>(new Set());
+  const windowsRef = useRef<Record<string, string | null>>({});
+  windowsRef.current = windows;
+
+  useEffect(() => {
+    if (!running) return;
+    const step = () => {
+      const { pairs, windows: next } = solveContacts(sceneTime(), held.current);
+      const prev = held.current;
+      if (pairs.length !== prev.size || pairs.some((k) => !prev.has(k))) {
+        held.current = new Set(pairs);
+        setContacts(pairs);
+      }
+      for (const [rxId, satId] of Object.entries(next)) {
+        if ((windowsRef.current[rxId] ?? null) !== satId) reportWindow(rxId, satId);
+      }
+    };
+    step();
+    const t = setInterval(step, 300);
+    return () => clearInterval(t);
+  }, [running, reportWindow]);
+
   useEffect(() => {
     if (!running) return;
     const t = setInterval(() => {
@@ -168,6 +199,7 @@ export function useOloLink(): OloLinkState {
     }, 1000);
     return () => clearInterval(t);
   }, [running]);
+
 
   useEffect(() => {
     if (!running) return;
