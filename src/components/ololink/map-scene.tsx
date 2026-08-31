@@ -349,7 +349,6 @@ export function MapScene({ state }: { state: OloLinkState }) {
             SATELLITES.map((sat) => {
               const el = SAT_ORBITS[sat.id];
               if (!el) return null;
-              const pts: string[] = [];
               let prev: { x: number; y: number } | null = null;
               const d: string[] = [];
               for (let i = 0; i <= 180; i++) {
@@ -363,7 +362,6 @@ export function MapScene({ state }: { state: OloLinkState }) {
                 if (prev && Math.abs(p.x - prev.x) > MAP_W / 2) d.push(`M ${p.x} ${p.y}`);
                 else d.push(`${prev ? 'L' : 'M'} ${p.x} ${p.y}`);
                 prev = p;
-                pts.push('');
               }
               return (
                 <path
