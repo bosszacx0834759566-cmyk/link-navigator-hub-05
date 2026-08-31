@@ -58,7 +58,6 @@ import {
   type RegionDef,
 } from '@/lib/layers';
 import {
-  DOWNLINK_TARGETS,
   SAT_ORBITS,
   SATELLITES,
   orbitPosition,
@@ -599,61 +598,6 @@ function PassBeam({
  * receiver's horizon and opens/closes contacts accordingly, with acquisition
  * and loss-of-signal thresholds (hysteresis) so links don't flicker.
  */
-const PASS_RECEIVERS = ASSETS.filter((a) => a.kind === 'ground' || a.kind === 'haps');
-const ACQUIRE = 0.34;
-const LOS = 0.16;
-const MAX_PER_RX = 1;
-const MAX_CONTACTS = 14;
-
-function PassNetwork({ live, running }: { live: LiveMap; running: boolean }) {
-  const [pairs, setPairs] = useState<string[]>([]);
-  const held = useRef<Set<string>>(new Set());
-  const acc = useRef(0);
-  const tmp = useRef(new THREE.Vector3());
-
-  useFrame((_, d) => {
-    acc.current += d;
-    if (acc.current < 0.3) return;
-    acc.current = 0;
-    if (!running) return;
-
-    const candidates: { key: string; score: number }[] = [];
-    for (const rx of PASS_RECEIVERS) {
-      const rp = live.get(rx.id);
-      if (!rp) continue;
-      const local: { key: string; score: number }[] = [];
-      for (const sat of SATELLITES) {
-        const sp = live.get(sat.id);
-        if (!sp) continue;
-        const score = windowScore(tmp.current.copy(sp), rp);
-        const key = `${sat.id}|${rx.id}`;
-        const threshold = held.current.has(key) ? LOS : ACQUIRE;
-        if (score > threshold) local.push({ key, score });
-      }
-      local.sort((x, y) => y.score - x.score);
-      candidates.push(...local.slice(0, MAX_PER_RX));
-    }
-    candidates.sort((x, y) => y.score - x.score);
-    const next = candidates.slice(0, MAX_CONTACTS).map((c) => c.key).sort();
-
-    const prev = held.current;
-    if (next.length !== prev.size || next.some((k) => !prev.has(k))) {
-      held.current = new Set(next);
-      setPairs(next);
-    }
-  });
-
-  return (
-    <>
-      {pairs.map((key) => {
-        const [satId, rxId] = key.split('|') as [string, string];
-        const laser = ASSET_BY_ID[rxId]?.kind === 'haps';
-        return <PassBeam key={key} satId={satId} rxId={rxId} live={live} laser={laser} />;
-      })}
-    </>
-  );
-}
-
 /**
  * LEO -> HAPS straight green laser links: every HAPS acquires the best LEO
  * currently above its horizon and holds the optical contact while it passes.
