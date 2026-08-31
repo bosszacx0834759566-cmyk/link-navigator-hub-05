@@ -31,6 +31,7 @@ import {
   type WeatherCell,
 } from '@/lib/ololink';
 import type { OloLinkState, Selection } from '@/hooks/use-ololink';
+import { sceneTime } from '@/lib/geo2d';
 import { LabelLayer, LabelProjector, useLabel } from '@/components/ololink/label-layer';
 import {
   
@@ -367,44 +368,13 @@ function OrbitTrack({ elId }: { elId: string }) {
  * Propagates the visual LEO model and evaluates communication windows.
  * Concept simulation only — circular paths, accelerated rates.
  */
-function OrbitDriver({ state, live }: { state: OloLinkState; live: LiveMap }) {
-  const acc = useRef(0);
-  const tmp = useRef(new THREE.Vector3());
-
-  useFrame(({ clock }, d) => {
-    const t = clock.elapsedTime;
+function OrbitDriver({ live }: { live: LiveMap }) {
+  useFrame(() => {
+    const t = sceneTime();
     for (const sat of SATELLITES) {
       const el = SAT_ORBITS[sat.id];
       const target = live.get(sat.id);
       if (el && target) orbitPosition(el, t, target);
-    }
-
-    if (!state.running) return;
-    acc.current += d;
-    if (acc.current < 0.5) return;
-    acc.current = 0;
-
-    for (const rx of DOWNLINK_TARGETS) {
-      const receiver = live.get(rx.id);
-      if (!receiver) continue;
-      let bestId: string | null = null;
-      let best = 0;
-      for (const satId of rx.sats) {
-        const pos = live.get(satId);
-        if (!pos) continue;
-        const score = windowScore(tmp.current.copy(pos), receiver);
-        if (score > best) {
-          best = score;
-          bestId = satId;
-        }
-      }
-      // hysteresis: hold an acquired link until the window really closes
-      const held = state.windows[rx.id] ?? null;
-      if (held && held !== bestId) {
-        const heldPos = live.get(held);
-        if (heldPos && windowScore(tmp.current.copy(heldPos), receiver) > 0.18) continue;
-      }
-      state.reportWindow(rx.id, best > 0.24 ? bestId : null);
     }
   });
 
@@ -736,54 +706,21 @@ function LaserBeam({
   );
 }
 
-function HapsLaserNetwork({ live, running }: { live: LiveMap; running: boolean }) {
-  const [pairs, setPairs] = useState<string[]>([]);
-  const held = useRef<Set<string>>(new Set());
-  const acc = useRef(0);
-  const tmp = useRef(new THREE.Vector3());
-
-  useFrame((_, d) => {
-    acc.current += d;
-    if (acc.current < 0.3) return;
-    acc.current = 0;
-    if (!running) return;
-
-    const next: string[] = [];
-    for (const rx of HAPS_RECEIVERS) {
-      const rp = live.get(rx.id);
-      if (!rp) continue;
-      let best: { key: string; score: number } | null = null;
-      for (const sat of SATELLITES) {
-        const sp = live.get(sat.id);
-        if (!sp) continue;
-        const score = windowScore(tmp.current.copy(sp), rp);
-        const key = `${sat.id}|${rx.id}`;
-        const threshold = held.current.has(key) ? LOS : ACQUIRE;
-        if (score > threshold && (!best || score > best.score)) best = { key, score };
-      }
-      if (best) next.push(best.key);
-    }
-    next.sort();
-
-    const prev = held.current;
-    if (next.length !== prev.size || next.some((k) => !prev.has(k))) {
-      held.current = new Set(next);
-      setPairs(next);
-    }
-  });
-
+function ContactNetwork({ live, contacts }: { live: LiveMap; contacts: string[] }) {
   return (
     <>
-      {pairs.map((key) => {
+      {contacts.map((key) => {
         const [satId, rxId] = key.split('|') as [string, string];
-        return <LaserBeam key={key} satId={satId} rxId={rxId} live={live} />;
+        const laser = ASSET_BY_ID[rxId]?.kind === 'haps';
+        return laser ? (
+          <LaserBeam key={key} satId={satId} rxId={rxId} live={live} />
+        ) : (
+          <PassBeam key={key} satId={satId} rxId={rxId} live={live} laser={false} />
+        );
       })}
     </>
   );
 }
-
-
-
 
 /**
  * Live satellite downlink: geometry is re-sampled every frame from the moving
@@ -2158,8 +2095,8 @@ function SceneContent({
       </Suspense>
 
       {/* LEO constellation — 20 satellites propagated on their visual orbits */}
-      <OrbitDriver state={state} live={live} />
-      <HapsLaserNetwork live={live} running={state.running} />
+      <OrbitDriver live={live} />
+      <ContactNetwork live={live} contacts={state.contacts} />
 
       {layers.orbits && SATELLITES.map((s) => <OrbitTrack key={`trk-${s.id}`} elId={s.id} />)}
       {SATELLITES.map((sat) => (
