@@ -12,7 +12,16 @@ import {
   type Asset,
   type AssetKind,
 } from '@/lib/ololink';
-import { MAP_H, MAP_W, livePosition, project, sceneTime, type LatLon } from '@/lib/geo2d';
+import {
+  MAP_H,
+  MAP_W,
+  livePosition,
+  project,
+  sceneTime,
+  vecToLatLon,
+  type LatLon,
+} from '@/lib/geo2d';
+import { SATELLITES, SAT_ORBITS } from '@/lib/orbits';
 
 const KIND_COLOR: Record<AssetKind, string> = {
   satellite: '#7dd3fc',
@@ -335,50 +344,58 @@ export function MapScene({ state }: { state: OloLinkState }) {
             preserveAspectRatio="none"
           />
 
-          {/* ------------------- LEO -> HAPS straight green laser links */}
-          {(() => {
-            const R = Math.PI / 180;
-            const central = (a: LatLon, b: LatLon) => {
-              const c =
-                Math.sin(a.lat * R) * Math.sin(b.lat * R) +
-                Math.cos(a.lat * R) * Math.cos(b.lat * R) * Math.cos((a.lon - b.lon) * R);
-              return (Math.acos(Math.max(-1, Math.min(1, c))) * 180) / Math.PI;
-            };
-            const sats = ASSETS.filter((a) => a.kind === 'satellite');
-            const haps = ASSETS.filter((a) => a.kind === 'haps');
-            const lines: React.ReactElement[] = [];
-            for (const h of haps) {
-              const hp = positions[h.id];
-              if (!hp) continue;
-              // nearest LEO currently inside the optical acquisition cone
-              let best: { id: string; d: number } | null = null;
-              for (const s of sats) {
-                const sp = positions[s.id];
-                if (!sp) continue;
-                const d = central(sp, hp);
-                if (d < 16 && (!best || d < best.d)) best = { id: s.id, d };
+          {/* orbit tracks — mirrors the 3D orbital rings */}
+          {layers.orbits &&
+            SATELLITES.map((sat) => {
+              const el = SAT_ORBITS[sat.id];
+              if (!el) return null;
+              let prev: { x: number; y: number } | null = null;
+              const d: string[] = [];
+              for (let i = 0; i <= 180; i++) {
+                const a = (i / 180) * Math.PI * 2;
+                const v = el.e1
+                  .clone()
+                  .multiplyScalar(Math.cos(a) * el.radius)
+                  .addScaledVector(el.e2, Math.sin(a) * el.radius);
+                const ll = vecToLatLon(v.x, v.y, v.z);
+                const p = project(ll.lat, ll.lon);
+                if (prev && Math.abs(p.x - prev.x) > MAP_W / 2) d.push(`M ${p.x} ${p.y}`);
+                else d.push(`${prev ? 'L' : 'M'} ${p.x} ${p.y}`);
+                prev = p;
               }
-              if (!best) continue;
-              const pa = pointOf(best.id);
-              const pb = pointOf(h.id);
-              if (!pa || !pb) continue;
-              if (Math.abs(pa.x - pb.x) > MAP_W / 2) continue; // antimeridian wrap
-              const strength = 1 - best.d / 16;
-              lines.push(
-                <line
-                  key={`laser-${h.id}`}
-                  x1={pa.x}
-                  y1={pa.y}
-                  x2={pb.x}
-                  y2={pb.y}
-                  stroke="#22c55e"
-                  strokeWidth={1.2 * inv}
-                  strokeOpacity={0.5 + 0.5 * strength}
+              return (
+                <path
+                  key={`trk-${sat.id}`}
+                  d={d.join(' ')}
+                  fill="none"
+                  stroke="#7dd3fc"
+                  strokeOpacity={0.12}
+                  strokeWidth={0.7 * inv}
                 />
               );
-            }
-            return lines;
-          })()}
+            })}
+
+          {/* ----------- open communication contacts (shared mission state) */}
+          {state.contacts.map((key) => {
+            const [satId, rxId] = key.split('|') as [string, string];
+            const pa = pointOf(satId);
+            const pb = pointOf(rxId);
+            if (!pa || !pb) return null;
+            if (Math.abs(pa.x - pb.x) > MAP_W / 2) return null; // antimeridian wrap
+            const laser = ASSET_BY_ID[rxId]?.kind === 'haps';
+            return (
+              <line
+                key={`contact-${key}`}
+                x1={pa.x}
+                y1={pa.y}
+                x2={pb.x}
+                y2={pb.y}
+                stroke={laser ? '#22c55e' : '#7dd3fc'}
+                strokeWidth={1.2 * inv}
+                strokeOpacity={0.85}
+              />
+            );
+          })}
 
           {/* ------------------------------------------------------- nodes */}
 
@@ -398,6 +415,9 @@ export function MapScene({ state }: { state: OloLinkState }) {
                   if (!dragged()) state.select({ type: 'asset', id: a.id });
                 }}
               >
+                {selected && (
+                  <circle r={11} fill="none" stroke="#e2e8f0" strokeOpacity={0.8} strokeWidth={0.9} />
+                )}
                 <NodeGlyph kind={a.kind} color={color} />
 
                 {layers.labels && (

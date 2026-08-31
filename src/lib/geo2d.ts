@@ -36,13 +36,34 @@ export function project(lat: number, lon: number): { x: number; y: number } {
 }
 
 /**
- * Scene clock shared by both views so satellite phase is continuous when the
- * operator switches 3D <-> 2D.
+ * Scene clock shared by BOTH views, so satellite phase, contacts and every
+ * derived state are identical and continuous when the operator switches
+ * 3D <-> 2D. Pausing the mission freezes the clock for both views at once.
  */
-const EPOCH = typeof performance !== 'undefined' ? performance.now() : 0;
+const now = () => (typeof performance !== 'undefined' ? performance.now() : 0);
+let accumulated = 0;
+let last = now();
+let clockRunning = true;
+
 export function sceneTime() {
-  return (typeof performance !== 'undefined' ? performance.now() - EPOCH : 0) / 1000;
+  const t = now();
+  if (clockRunning) accumulated += (t - last) / 1000;
+  last = t;
+  return accumulated;
 }
+
+/** Freeze / resume the shared clock (mission run state). */
+export function setSceneRunning(v: boolean) {
+  sceneTime();
+  clockRunning = v;
+}
+
+/** Rewind the shared clock (mission reset). */
+export function resetSceneTime() {
+  accumulated = 0;
+  last = now();
+}
+
 
 /** Live ground track of an asset — orbiting sats propagate, everything else is fixed. */
 export function livePosition(asset: Asset, t: number): LatLon {
