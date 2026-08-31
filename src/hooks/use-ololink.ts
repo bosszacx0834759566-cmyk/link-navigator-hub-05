@@ -12,6 +12,8 @@ import {
   type ScenarioId,
   type ScenarioProfile,
 } from '@/lib/ololink';
+import { solveContacts } from '@/lib/contacts';
+import { resetSceneTime, sceneTime, setSceneRunning } from '@/lib/geo2d';
 
 export type RailId =
   | 'overview'
@@ -87,6 +89,8 @@ export interface OloLinkState {
   techFilter: Record<Tech, boolean>;
   /** receiverId -> satellite id currently inside a simulated communication window */
   windows: Record<string, string | null>;
+  /** open satellite contacts as `${satId}|${receiverId}` — shared by both views */
+  contacts: string[];
   reportWindow: (receiverId: string, satId: string | null) => void;
   toggleTech: (t: Tech) => void;
   setScenario: (id: ScenarioId) => void;
@@ -122,6 +126,7 @@ export function useOloLink(): OloLinkState {
   });
   const [telemetry, setTelemetry] = useState<Telemetry>(SCENARIOS.clear.telemetry);
   const [windows, setWindows] = useState<Record<string, string | null>>({});
+  const [contacts, setContacts] = useState<string[]>([]);
   const [events, setEvents] = useState<EventEntry[]>([
     { id: 'e0', time: 'T+00:00', level: 'INFO', text: 'Orchestration session initialised' },
     { id: 'e1', time: 'T+00:02', level: 'OK', text: 'Constellation handshake complete' },
@@ -266,6 +271,9 @@ export function useOloLink(): OloLinkState {
     setReroutingIds(new Set());
     setTelemetry(SCENARIOS.clear.telemetry);
     setWindows({});
+    setContacts([]);
+    held.current = new Set();
+    resetSceneTime();
     setRunning(true);
     setEvents([
       { id: 'e0', time: 'T+00:00', level: 'INFO', text: 'Orchestration session reset' },
@@ -301,6 +309,7 @@ export function useOloLink(): OloLinkState {
     layers,
     techFilter,
     windows,
+    contacts,
     reportWindow,
     toggleTech: (t) => setTechFilter((f) => ({ ...f, [t]: !f[t] })),
     setScenario,
